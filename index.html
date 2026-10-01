@@ -49,6 +49,9 @@ label{display:block;font-size:14px;color:var(--mut);margin:8px 0 3px}
  </div>
  <div class="card">
   <b>匯入地震資料</b>
+  <label>方法一:選擇 CSV 檔(氣象署「地震活動彙整」下載的檔案)</label>
+  <input type="file" id="file" accept=".csv,text/csv,text/plain">
+  <label>方法二:貼上文字</label>
   <p class="mut">從中央氣象署「地震活動彙整」下載或複製清單後貼上,每行需含「日期時間」和「規模」,例如:<br>2026-09-20 14:32:10, 4.8</p>
   <textarea id="csv" rows="6" placeholder="貼上地震清單…"></textarea>
   <button class="s" id="imp" style="margin-top:8px;width:100%">匯入</button>
@@ -101,15 +104,29 @@ function delQ(i){Q.splice(i,1);save();render()}
 $("now").onclick=function(){T.push({t:Date.now(),l:+$("lv").value});save();render()};
 $("add").onclick=function(){if(!$("dt").value)return;T.push({t:new Date($("dt").value).getTime(),l:+$("lv").value});save();render()};
 $("qadd").onclick=function(){var m=parseFloat($("qm").value);if(!$("qdt").value||isNaN(m))return;Q.push({t:new Date($("qdt").value).getTime(),m:m});save();render()};
-$("imp").onclick=function(){
+function decodeBuf(buf){try{return new TextDecoder("utf-8",{fatal:true}).decode(buf)}catch(e){return new TextDecoder("big5").decode(buf)}}
+function csvLine(l){var o=[],c="",q=false;for(var i=0;i<l.length;i++){var ch=l[i];if(ch=='"'){q=!q}else if(ch==","&&!q){o.push(c);c=""}else c+=ch}o.push(c);return o}
+function importText(text){
+ var pad=function(x){return String(x).padStart(2,"0")};
+ var re=/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?/;
+ var lines=text.replace(/^\uFEFF/,"").split(/\r?\n/).filter(function(x){return x.trim()});
+ var ti=-1,mi=-1,start=0;
+ csvLine(lines[0]||"").forEach(function(x,i){if(ti<0&&/時間|time/i.test(x))ti=i;if(mi<0&&/規模|mag/i.test(x))mi=i});
+ var hasH=ti>=0&&mi>=0;if(hasH)start=1;
  var n=0,seen={};Q.forEach(function(q){seen[q.t+"_"+q.m]=1});
- $("csv").value.split(/\r?\n/).forEach(function(line){
-  var r=line.match(/(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})[ T]+(\d{1,2}):(\d{2})/);if(!r)return;
-  var rest=line.replace(r[0],"");var m=rest.match(/\d+\.\d+|\b\d\b/);if(!m)return;
-  var t=new Date(+r[1],r[2]-1,+r[3],+r[4],+r[5]).getTime(),mg=parseFloat(m[0]);
-  if(seen[t+"_"+mg])return;seen[t+"_"+mg]=1;Q.push({t:t,m:mg});n++});
- save();render();$("impmsg").textContent="已匯入 "+n+" 筆";$("csv").value="";
-};
+ for(var j=start;j<lines.length;j++){
+  var line=lines[j],c=csvLine(line),r=(hasH?(c[ti]||""):line).match(re);if(!r)continue;
+  var m=NaN;
+  if(hasH){m=parseFloat(c[mi])}else{var mm=line.replace(r[0],"").match(/\d+\.\d+|\b\d\b/);if(mm)m=parseFloat(mm[0])}
+  if(isNaN(m))continue;
+  var t=new Date(r[1]+"-"+pad(r[2])+"-"+pad(r[3])+"T"+pad(r[4])+":"+r[5]+":"+(r[6]||"00")+"+08:00").getTime();
+  if(isNaN(t)||seen[t+"_"+m])continue;seen[t+"_"+m]=1;Q.push({t:t,m:m});n++}
+ save();render();return n;
+}
+$("file").onchange=function(e){var f=e.target.files[0];if(!f)return;var rd=new FileReader();
+ rd.onload=function(){var n=importText(decodeBuf(rd.result));$("impmsg").textContent="已匯入 "+n+" 筆(重複的會自動略過)"};
+ rd.readAsArrayBuffer(f);e.target.value=""};
+$("imp").onclick=function(){var n=importText($("csv").value);$("impmsg").textContent="已匯入 "+n+" 筆";$("csv").value=""};
 $("run").onclick=function(){
  var W=(+$("win").value||48)*3600e3,M=+$("mag").value;
  if(T.length<2){$("out").innerHTML='<div class="card">請先記錄至少 2 筆耳鳴。</div>';return}
